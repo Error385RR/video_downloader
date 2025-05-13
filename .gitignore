@@ -1,0 +1,4 @@
+#ignore dir
+.venv/
+build/
+onedl.egg-info/
