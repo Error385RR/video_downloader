@@ -1,15 +1,26 @@
 # main.py
 import os
+import sys
 from .video_utils import get_video_infos, get_video_duration
 import yt_dlp
 
 def estimate_size(duration_sec, bitrate_kbps):
     return round((bitrate_kbps * duration_sec) / 8 / 1024, 2)
 
-def download_media(urls, mode='video', quality='best', save_path='/storage/emulated/0/Download/termux/'):
-    import yt_dlp
-    import os
+def get_default_save_path():
+    if "ANDROID_STORAGE" in os.environ or "com.termux" in sys.prefix:
+        # Likely Termux
+        return "/storage/emulated/0/Download/termux/"
+    elif sys.platform.startswith("win"):
+        return os.path.expanduser("~/Downloads/video_downloader/")
+    else:
+        return os.path.expanduser("~/Downloads/video_downloader/")
 
+def download_media(urls, mode='video', quality='best', save_path='/storage/emulated/0/Download/termux/'):
+
+    if not save_path:
+        save_path = get_default_save_path()
+    
     os.makedirs(save_path, exist_ok=True)
 
     if mode == 'audio':
@@ -56,10 +67,15 @@ def main():
     # Cache durations once
     durations = [get_video_duration(video['webpage_url']) for video in video_infos]
 
+    user_path = input("Enter save directory (or leave blank for default): ").strip()
+    save_path = os.path.expanduser(user_path) if user_path else get_default_save_path()
+
+
+    """
     save_path = input("Enter save directory (default: downloads): ").strip()
     if not save_path:
         save_path = '/storage/emulated/0/Download/termux/'
-
+    """
     mode = input("Download mode - video or audio? (v/a): ").strip().lower()
     mode = 'audio' if mode == 'a' else 'video'
 
