@@ -3,3 +3,4 @@
 build/
 onedl.egg-info/
 onedl/__pycache__/
+*.pyc
