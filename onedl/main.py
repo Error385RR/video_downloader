@@ -4,8 +4,14 @@ import sys
 from .video_utils import get_video_infos, get_video_duration
 import yt_dlp
 
-def estimate_size(duration_sec, bitrate_kbps):
-    return round((bitrate_kbps * duration_sec) / 8 / 1024, 2)
+def estimate_size(duration_sec, bitrate_kbps, efficiency_factor=0.85):
+    """
+    Estimate file size in MB given duration in seconds and bitrate in kbps.
+    Applies an efficiency factor to correct for real-world compression.
+    """
+    size_bytes = (bitrate_kbps * 1000 / 8) * duration_sec * efficiency_factor
+    return round(size_bytes / (1024 ** 2), 2)
+
 
 def get_default_save_path():
     if "ANDROID_STORAGE" in os.environ or "com.termux" in sys.prefix:
@@ -47,12 +53,15 @@ def download_media(urls, mode='video', quality='best', save_path='/storage/emula
         }
         ydl_opts = { 'format': format_map.get(quality, 'best'), 
             'outtmpl': f'{save_path}/%(title)s.%(ext)s', 
-            'merge_output_format': 'mp4', 'quiet': False, 
-            'nocheckcertificate': True, 'prefer_ffmpeg': True, 
+            'merge_output_format': 'mp4',
+            'quiet': False, 
+            'nocheckcertificate': True,
+            'prefer_ffmpeg': True, 
+            'nocache': True,     
             'no_mtime': True,
             'nooverwrites': True,
-            'nocache': True,        
-}
+            'nocache': True,   
+        }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         urls_to_download = [video['webpage_url'] for video in urls] if isinstance(urls, list) else [urls]
@@ -65,7 +74,10 @@ def main():
     video_infos = get_video_infos(url, is_playlist)
 
     # Cache durations once
-    durations = [get_video_duration(video['webpage_url']) for video in video_infos]
+    #durations = [get_video_duration(video['webpage_url']) for video in video_infos]
+
+    durations = [video.get('duration', 0) for video in video_infos]
+
 
     user_path = input("Enter save directory (or leave blank for default): ").strip()
     save_path = os.path.expanduser(user_path) if user_path else get_default_save_path()
@@ -92,7 +104,7 @@ def main():
             total_size = sum(estimate_size(d, kbps) for d in durations)
             print(f"{key}. {label} — approx. {total_size} MB")
         choice = input("Enter choice (1-5): ").strip()
-        selected_quality, _ = bitrates.get(choice, ('best', 4000))
+        selected_quality, _ = bitrates.get(choice, ('best', 4000 + 192))
         quality_param = selected_quality
     else:
         audio_bitrates = {
