@@ -2,4 +2,3 @@
 .venv/
 build/
 onedl.egg-info/
-onedl/__pycache__/

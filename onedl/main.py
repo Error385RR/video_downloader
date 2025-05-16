@@ -1,7 +1,7 @@
 # main.py
 import os
 import sys
-from .video_utils import get_video_infos, get_video_duration
+from video_utils import get_video_infos, get_video_duration
 import yt_dlp
 
 def estimate_size(duration_sec, bitrate_kbps, efficiency_factor=0.85):
@@ -22,12 +22,14 @@ def get_default_save_path():
     else:
         return os.path.expanduser("~/Downloads/video_downloader/")
 
-def download_media(urls, mode='video', quality='best', save_path='/storage/emulated/0/Download/termux/'):
+def download_media(urls, mode='video', quality='best', save_path=None,cookiefile=None):
 
     if not save_path:
         save_path = get_default_save_path()
     
     os.makedirs(save_path, exist_ok=True)
+
+
 
     if mode == 'audio':
         ydl_opts = {
@@ -62,6 +64,9 @@ def download_media(urls, mode='video', quality='best', save_path='/storage/emula
             'nooverwrites': True,
             'nocache': True,   
         }
+
+    if cookiefile:
+        ydl_opts['cookiefile'] = cookiefile
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         urls_to_download = [video['webpage_url'] for video in urls] if isinstance(urls, list) else [urls]
@@ -121,11 +126,17 @@ def main():
         selected_bitrate_label, _ = audio_bitrates.get(choice, ('192', 192))
         quality_param = selected_bitrate_label
 
+    cookiefile = input("Enter path to cookies file (leave blank if none): ").strip()
+    if cookiefile == '':
+        cookiefile = None
+
+
     download_media(
         video_infos if is_playlist else url,
         mode,
         quality_param,
-        save_path
+        save_path,
+        cookiefile=cookiefile
     )
 
 if __name__ == '__main__':
