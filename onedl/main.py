@@ -67,16 +67,27 @@ def download_media(urls, mode='video', quality='best', save_path=None,cookiefile
 
     if cookiefile:
         ydl_opts['cookiefile'] = cookiefile
+        print(f"Using cookies from: {cookiefile}")
+
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         urls_to_download = [video['webpage_url'] for video in urls] if isinstance(urls, list) else [urls]
         ydl.download(urls_to_download)
 
+
+
 def main():
     url = input("Enter YouTube video or playlist URL: ").strip()
     is_playlist = input("Is this a playlist? (y/n): ").strip().lower() == 'y'
+    cookiefile = input("Enter path to cookies file (leave blank if none): ").strip() or None
+
+    print(f"Using cookies from: {cookiefile}")
+    
+    print("Exists?", os.path.exists(cookiefile))
+
+
     print("\nFetching video information...")
-    video_infos = get_video_infos(url, is_playlist)
+    video_infos = get_video_infos(url, is_playlist, cookiefile=cookiefile)
 
     # Cache durations once
     #durations = [get_video_duration(video['webpage_url']) for video in video_infos]
@@ -126,10 +137,7 @@ def main():
         selected_bitrate_label, _ = audio_bitrates.get(choice, ('192', 192))
         quality_param = selected_bitrate_label
 
-    cookiefile = input("Enter path to cookies file (leave blank if none): ").strip()
-    if cookiefile == '':
-        cookiefile = None
-
+ 
 
     download_media(
         video_infos if is_playlist else url,
