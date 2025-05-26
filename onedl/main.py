@@ -1,7 +1,7 @@
 # main.py
 import os
 import sys
-from video_utils import get_video_infos, get_video_duration
+from .video_utils import get_video_infos, get_video_duration
 import yt_dlp
 
 def estimate_size(duration_sec, bitrate_kbps, efficiency_factor=0.85):
@@ -81,9 +81,13 @@ def main():
     is_playlist = input("Is this a playlist? (y/n): ").strip().lower() == 'y'
     cookiefile = input("Enter path to cookies file (leave blank if none): ").strip() or None
 
+    user_path = input("Enter save directory (or leave blank for default): ").strip()
+    save_path = os.path.expanduser(user_path) if user_path else get_default_save_path()
+
+
     print(f"Using cookies from: {cookiefile}")
     
-    print("Exists?", os.path.exists(cookiefile))
+#    print("Exists?", os.path.exists(cookiefile))
 
 
     print("\nFetching video information...")
@@ -95,8 +99,6 @@ def main():
     durations = [video.get('duration', 0) for video in video_infos]
 
 
-    user_path = input("Enter save directory (or leave blank for default): ").strip()
-    save_path = os.path.expanduser(user_path) if user_path else get_default_save_path()
 
 
     """
