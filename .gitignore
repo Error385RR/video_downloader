@@ -1,6 +1,6 @@
 #ignore dir
 .venv/
 build/
-onedl.egg-info/
-onedl/__pycache__/
+video_downloader.egg-info/
+video_downloader/__pycache__/
 *.pyc

@@ -1,18 +1,18 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='onedl',
-    version='1.0',
+    name='video_downloader',
+    version='1.3',
     packages=find_packages(),
     install_requires=[
         'yt-dlp'
     ],
     entry_points={
         'console_scripts': [
-            'onedl = onedl.main:main',
+            'video_downloader = video_downloader.main:main',
         ],
     },
-    author='Your Name',
+    author='Error385RR',
     description='A YouTube downloader CLI using yt-dlp',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',

@@ -1,7 +1,9 @@
 # main.py
 import os
 import sys
-from .video_utils import get_video_infos, get_video_duration
+import time
+from datetime import datetime
+from video_utils import get_video_infos, get_video_duration
 import yt_dlp
 
 def estimate_size(duration_sec, bitrate_kbps, efficiency_factor=0.85):
@@ -21,6 +23,13 @@ def get_default_save_path():
         return os.path.expanduser("~/Downloads/video_downloader/")
     else:
         return os.path.expanduser("~/Downloads/video_downloader/")
+
+def log_download_result(log_path, title, url, filepath, status, resolution='N/A'):
+    with open(log_path, 'a', encoding='utf-8') as f:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        f.write(f"[{timestamp}] {status.upper()} | {title} | {url} -> {filepath} | Resolution: {resolution}\n")
+
+
 
 def download_media(urls, mode='video', quality='best', save_path=None,cookiefile=None):
 
@@ -47,12 +56,13 @@ def download_media(urls, mode='video', quality='best', save_path=None,cookiefile
     else:
         # Updated fallback formats for video quality
         format_map = {
-            '1080p': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-            '720p': 'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
-            '480p': 'bestvideo[height<=480]+bestaudio/best[height<=480]/best',
-            '360p': 'bestvideo[height<=360]+bestaudio/best[height<=360]/best',
-            'best': 'bestvideo+bestaudio/best'
-        }
+            '1080p': 'bestvideo[height<=1080][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
+            '720p':  'bestvideo[height<=720][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
+            '480p':  'bestvideo[height<=480][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
+            '360p':  'bestvideo[height<=360][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
+            'best':  'bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]'
+            }
+        
         ydl_opts = { 'format': format_map.get(quality, 'best'), 
             'outtmpl': f'{save_path}/%(title)s.%(ext)s', 
             'merge_output_format': 'mp4',
@@ -61,8 +71,7 @@ def download_media(urls, mode='video', quality='best', save_path=None,cookiefile
             'prefer_ffmpeg': True, 
             'nocache': True,     
             'no_mtime': True,
-            'nooverwrites': True,
-            'nocache': True,   
+            'nooverwrites': True,   
         }
 
     if cookiefile:
@@ -73,6 +82,26 @@ def download_media(urls, mode='video', quality='best', save_path=None,cookiefile
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         urls_to_download = [video['webpage_url'] for video in urls] if isinstance(urls, list) else [urls]
         ydl.download(urls_to_download)
+        
+        log_file = os.path.join(save_path, 'download_history.txt')
+        for url in urls_to_download:
+            try:
+                info = ydl.extract_info(url, download=False)
+                title = info.get('title', 'Unknown Title')
+                filename = ydl.prepare_filename(info)
+                
+                # ✅ Force mtime to current time
+                if os.path.isfile(filename):
+                    now = time.time()
+                    os.utime(filename, (now, now))
+
+                # Try to get resolution (height x width or formatted)
+                resolution = f"{info.get('height', 'N/A')}p" if info.get('height') else 'N/A'
+                
+                log_download_result(log_file, title, url, filename, 'success', resolution)
+            except Exception as e:
+                log_download_result(log_file, 'N/A', url, 'N/A', f'failed ({str(e)[:100]})')
+                print(f"Download failed for {url}: {e}")
 
 
 
