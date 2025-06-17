@@ -2,9 +2,11 @@
 import os
 import sys
 import time
+import argparse
 from datetime import datetime
-from video_utils import get_video_infos, get_video_duration
+from .video_utils import get_video_infos, get_video_duration
 import yt_dlp
+
 
 def estimate_size(duration_sec, bitrate_kbps, efficiency_factor=0.85):
     """
@@ -104,37 +106,39 @@ def download_media(urls, mode='video', quality='best', save_path=None,cookiefile
                 print(f"Download failed for {url}: {e}")
 
 
-
 def main():
-    url = input("Enter YouTube video or playlist URL: ").strip()
-    is_playlist = input("Is this a playlist? (y/n): ").strip().lower() == 'y'
-    cookiefile = input("Enter path to cookies file (leave blank if none): ").strip() or None
+    parser = argparse.ArgumentParser(description="YouTube Downloader")
+    parser.add_argument('--file', type=str, help='Path to text file with list of YouTube URLs')
+    args = parser.parse_args()
 
+    if args.file:
+        if not os.path.isfile(args.file):
+            print(f"File not found: {args.file}")
+            sys.exit(1)
+        with open(args.file, 'r') as f:
+            urls = [line.strip() for line in f if line.strip()]
+        print(f"Loaded {len(urls)} URLs from {args.file}")
+        is_playlist = False  # Assume list of video URLs for simplicity
+        url = None  # We're using `urls` instead of `url`
+    else:
+        url = input("Enter YouTube video or playlist URL: ").strip()
+        is_playlist = input("Is this a playlist? (y/n): ").strip().lower() == 'y'
+        urls = [url]
+
+    cookiefile = input("Enter path to cookies file (leave blank if none): ").strip() or None
     user_path = input("Enter save directory (or leave blank for default): ").strip()
     save_path = os.path.expanduser(user_path) if user_path else get_default_save_path()
 
-
     print(f"Using cookies from: {cookiefile}")
-    
-#    print("Exists?", os.path.exists(cookiefile))
-
-
     print("\nFetching video information...")
-    video_infos = get_video_infos(url, is_playlist, cookiefile=cookiefile)
 
-    # Cache durations once
-    #durations = [get_video_duration(video['webpage_url']) for video in video_infos]
+    all_video_infos = []
+    for single_url in urls:
+        infos = get_video_infos(single_url, is_playlist, cookiefile=cookiefile)
+        all_video_infos.extend(infos)
 
-    durations = [video.get('duration', 0) for video in video_infos]
+    durations = [video.get('duration', 0) for video in all_video_infos]
 
-
-
-
-    """
-    save_path = input("Enter save directory (default: downloads): ").strip()
-    if not save_path:
-        save_path = '/storage/emulated/0/Download/termux/'
-    """
     mode = input("Download mode - video or audio? (v/a): ").strip().lower()
     mode = 'audio' if mode == 'a' else 'video'
 
@@ -168,15 +172,23 @@ def main():
         selected_bitrate_label, _ = audio_bitrates.get(choice, ('192', 192))
         quality_param = selected_bitrate_label
 
- 
-
-    download_media(
-        video_infos if is_playlist else url,
-        mode,
-        quality_param,
-        save_path,
-        cookiefile=cookiefile
-    )
+    # Pass in either a single URL or video infos
+    if args.file or is_playlist:
+        download_media(
+            all_video_infos,
+            mode,
+            quality_param,
+            save_path,
+            cookiefile=cookiefile
+        )
+    else:
+        download_media(
+            url,
+            mode,
+            quality_param,
+            save_path,
+            cookiefile=cookiefile
+        )
 
 if __name__ == '__main__':
     main()
