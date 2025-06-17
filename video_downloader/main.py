@@ -99,7 +99,7 @@ def main():
     parser.add_argument("--url", help="Video URL")
     parser.add_argument("--mode", choices=["video", "audio"], help="Download mode")
     parser.add_argument("--quality", help="Video quality or audio bitrate")
-    parser.add_argument("--cookiefile", help="Path to cookies.txt file")
+    parser.add_argument("--cookiefile", help="Path to cookies.txt file")    
     args = parser.parse_args()
 
     if args.file:
@@ -109,25 +109,29 @@ def main():
         with open(args.file, 'r') as f:
             urls = [line.strip() for line in f if line.strip()]
         print(f"Loaded {len(urls)} URLs from {args.file}")
-        is_playlist = False
-        url = None
     else:
         url = args.url or input("Enter YouTube video or playlist URL: ").strip()
-        is_playlist = input("Is this a playlist? (y/n): ").strip().lower() == 'y'
         urls = [url]
 
     cookiefile = args.cookiefile or input("Enter path to cookies file (leave blank if none): ").strip() or None
+    if cookiefile and not os.path.isfile(cookiefile):
+        print(f"Warning: Cookie file not found: {cookiefile}")
+        cookiefile = None
+
     user_path = input("Enter save directory (or leave blank for default): ").strip()
     save_path = os.path.expanduser(user_path) if user_path else get_default_save_path()
 
-    print("\nFetching video information...")
-    all_video_infos = []
-    for single_url in urls:
-        infos = get_video_infos(single_url, is_playlist, cookiefile=cookiefile)
-        all_video_infos.extend(infos)
+    print("\nFetching durations for size estimation...")
+    durations = []
+    for url in urls:
+        try:
+            info = get_video_infos(url, is_playlist=False, cookiefile=cookiefile)[0]
+            durations.append(info.get("duration", 0))
+        except Exception as e:
+            print(f"Failed to get duration for {url}: {e}")
+            durations.append(0)
 
-    durations = [video.get('duration', 0) for video in all_video_infos]
-
+    # Choose download mode
     mode = args.mode or input("Download mode - video or audio? (v/a): ").strip().lower()
     mode = 'audio' if mode == 'a' else 'video'
 
@@ -161,22 +165,14 @@ def main():
         selected_bitrate_label, _ = audio_bitrates.get(choice, ('192', 192))
         quality_param = selected_bitrate_label
 
-    if args.file or is_playlist:
-        download_media(
-            all_video_infos,
-            mode,
-            quality_param,
-            save_path,
-            cookiefile=cookiefile
-        )
-    else:
-        download_media(
-            url,
-            mode,
-            quality_param,
-            save_path,
-            cookiefile=cookiefile
-        )
+    print("\nStarting downloads...\n")
+
+    for i, url in enumerate(urls, 1):
+        try:
+            info = get_video_infos(url, is_playlist=False, cookiefile=cookiefile)[0]
+            download_media([info], mode, quality_param, save_path, cookiefile=cookiefile)
+        except Exception as e:
+            print(f"[{i}/{len(urls)}] Skipped due to error: {e}")
 
 
 if __name__ == '__main__':
