@@ -1,10 +1,10 @@
 # main.py
 import os
 import sys
-import time
+import json
 import argparse
 from datetime import datetime
-from .video_utils import get_video_infos, get_video_duration
+from video_utils import get_video_infos, get_playlist_entries
 import yt_dlp
 
 
@@ -22,13 +22,36 @@ def get_default_save_path():
         return os.path.expanduser("~/Downloads/video_downloader/")
 
 
-def log_download_result(log_path, title, url, filepath, status, resolution='N/A'):
-    with open(log_path, 'a', encoding='utf-8') as f:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        f.write(f"[{timestamp}] {status.upper()} | {title} | {url} -> {filepath} | Resolution: {resolution}\n")
+# ---------------- JSON HISTORY LOGGER ---------------- #
+
+def log_session_result(log_path, session_id, entries):
+    history = {}
+    if os.path.isfile(log_path):
+        try:
+            with open(log_path, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+        except Exception as e:
+            print(f"[WARNING] Could not read history file: {e}")
+            history = {}
+
+    history[session_id] = entries
+
+    with open(log_path, 'w', encoding='utf-8') as f:
+        json.dump(history, f, indent=2, ensure_ascii=False)
 
 
-def download_media(urls, mode='video', quality='best', save_path=None, cookiefile=None):
+def build_cookie_opts(cookiefile, ydl_opts):
+    if cookiefile:
+        if not os.path.isfile(cookiefile):
+            print(f"[WARNING] Cookie file not found: {cookiefile}")
+        else:
+            ydl_opts['cookiefile'] = cookiefile
+            print(f"Using cookies from: {cookiefile}")
+    return ydl_opts
+
+
+def download_one(url_or_info, mode, quality, save_path, cookiefile, session_entries):
+    """Download a single video and append its result to session_entries."""
     if not save_path:
         save_path = get_default_save_path()
     os.makedirs(save_path, exist_ok=True)
@@ -36,13 +59,17 @@ def download_media(urls, mode='video', quality='best', save_path=None, cookiefil
     if mode == 'audio':
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': f'{save_path}/%(title)s.%(ext)s',
+            'outtmpl': f'{save_path}/%(title)s.%(ext)s',  # no -id
             'quiet': False,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': quality,
-            }],
+            'postprocessors': [
+                {
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': quality,
+                },
+                {'key': 'EmbedThumbnail'}
+            ],
+            'writethumbnail': True,
             'nocheckcertificate': True,
             'prefer_ffmpeg': True,
         }
@@ -56,9 +83,11 @@ def download_media(urls, mode='video', quality='best', save_path=None, cookiefil
         }
         ydl_opts = {
             'format': format_map.get(quality, 'best'),
-            'outtmpl': f'{save_path}/%(title)s.%(ext)s',
+            'outtmpl': f'{save_path}/%(title)s.%(ext)s',  # no -id
             'merge_output_format': 'mp4',
             'quiet': False,
+            'postprocessors': [{'key': 'EmbedThumbnail'}],
+            'writethumbnail': True,
             'nocheckcertificate': True,
             'prefer_ffmpeg': True,
             'nocache': True,
@@ -66,117 +95,153 @@ def download_media(urls, mode='video', quality='best', save_path=None, cookiefil
             'nooverwrites': True,
         }
 
-    if cookiefile:
-        if not os.path.isfile(cookiefile):
-            print(f"Warning: Cookie file not found: {cookiefile}")
-            cookiefile = None
-        else:
-            ydl_opts['cookiefile'] = cookiefile
-            print(f"Using cookies from: {cookiefile}")
+    ydl_opts = build_cookie_opts(cookiefile, ydl_opts)
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        urls_to_download = [video['webpage_url'] for video in urls] if isinstance(urls, list) else [urls]
-        ydl.download(urls_to_download)
-
-        log_file = os.path.join(save_path, 'download_history.txt')
-        for info in (urls if isinstance(urls, list) else []):
-            try:
-                title = info.get('title', 'Unknown Title')
-                filename = ydl.prepare_filename(info)
-                if os.path.isfile(filename):
-                    now = time.time()
-                    os.utime(filename, (now, now))
-                resolution = f"{info.get('height', 'N/A')}p" if info.get('height') else 'N/A'
-                log_download_result(log_file, title, info.get('webpage_url', 'N/A'), filename, 'success', resolution)
-            except Exception as e:
-                log_download_result(log_file, 'N/A', info.get('webpage_url', 'N/A'), 'N/A', f'failed ({str(e)[:100]})')
-                print(f"Logging failed for {info.get('webpage_url', 'N/A')}: {e}")
+        try:
+            info = ydl.extract_info(
+                url_or_info if isinstance(url_or_info, str) else url_or_info.get("webpage_url"),
+                download=True
+            )
+            filename = ydl.prepare_filename(info)
+            resolution = f"{info.get('height', 'N/A')}p" if info.get('height') else 'N/A'
+            session_entries.append({
+                "title": info.get("title", "Unknown Title"),
+                "url": info.get("webpage_url", "N/A"),
+                "filepath": filename,
+                "status": "success" if os.path.isfile(filename) else "unknown",
+                "resolution": resolution
+            })
+        except Exception as e:
+            print(f"[ERROR] Failed to download {url_or_info}: {e}")
+            session_entries.append({
+                "title": "N/A",
+                "url": url_or_info if isinstance(url_or_info, str) else url_or_info.get("webpage_url", "N/A"),
+                "filepath": "N/A",
+                "status": f"failed ({str(e)[:100]})",
+                "resolution": "N/A"
+            })
 
 
 def main():
     parser = argparse.ArgumentParser(description="YouTube Downloader")
-    parser.add_argument('--file', type=str, help='Path to text file with list of YouTube URLs')
-    parser.add_argument("--url", help="Video URL")
+    parser.add_argument("url", nargs="?", help="Video or playlist URL")
+    parser.add_argument("--playlist", action="store_true", help="Treat the given URL as a playlist (sequential)")
     parser.add_argument("--mode", choices=["video", "audio"], help="Download mode")
     parser.add_argument("--quality", help="Video quality or audio bitrate")
     parser.add_argument("--cookiefile", help="Path to cookies.txt file")
+    parser.add_argument("--debug", action="store_true", help="Show yt-dlp version and exit")
     args = parser.parse_args()
 
-    if args.file:
-        if not os.path.isfile(args.file):
-            print(f"File not found: {args.file}")
+    # Debug option
+    if args.debug:
+        print(f"yt-dlp version: {yt_dlp.version.__version__}")
+        sys.exit(0)
+
+    # URL handling
+    if args.url:
+        url = args.url
+    else:
+        url = input("Enter YouTube video or playlist URL: ").strip()
+
+    # Session ID
+    session_id = datetime.now().isoformat(timespec='seconds')
+    save_path = get_default_save_path()
+    log_file = os.path.join(save_path, 'download_history.json')
+    session_entries = []
+
+    # Playlist mode
+    if args.playlist:
+        print("\nFetching playlist entries...")
+        playlist_urls = get_playlist_entries(url, cookiefile=args.cookiefile)
+        if not playlist_urls:
+            print("[ERROR] Could not fetch playlist or playlist is empty.")
             sys.exit(1)
-        with open(args.file, 'r') as f:
-            urls = [line.strip() for line in f if line.strip()]
-        print(f"Loaded {len(urls)} URLs from {args.file}")
-        is_playlist = False
-        url = None
+
+        print(f"Found {len(playlist_urls)} videos in playlist.")
+        # Ask mode + quality once
+        mode = args.mode or input("Download mode - video or audio? (v/a): ").strip().lower()
+        mode = 'audio' if mode.startswith('a') else 'video'
+
+        if mode == 'video':
+            bitrates = {
+                '1': ('1080p', 5000),
+                '2': ('720p', 2500),
+                '3': ('480p', 1000),
+                '4': ('360p', 700),
+                '5': ('best', 4000)
+            }
+            print("\nChoose video quality:")
+            for key, (label, _) in bitrates.items():
+                print(f"{key}. {label}")
+            choice = input("Enter choice (1-5): ").strip()
+            selected_quality, _ = bitrates.get(choice, ('best', 4000 + 192))
+            quality_param = selected_quality
+        else:
+            audio_bitrates = {
+                '1': ('128', 128),
+                '2': ('192', 192),
+                '3': ('256', 256),
+                '4': ('320', 320)
+            }
+            print("\nChoose MP3 bitrate:")
+            for key, (label, _) in audio_bitrates.items():
+                print(f"{key}. {label} kbps")
+            choice = input("Enter choice (1-4): ").strip()
+            selected_bitrate_label, _ = audio_bitrates.get(choice, ('192', 192))
+            quality_param = selected_bitrate_label
+
+        # Download sequentially with progress indicator
+        total = len(playlist_urls)
+        for idx, vid_url in enumerate(playlist_urls, 1):
+            print(f"\n[{idx}/{total}] Downloading {vid_url}")
+            download_one(vid_url, mode, quality_param, save_path, args.cookiefile, session_entries)
+
     else:
-        url = args.url or input("Enter YouTube video or playlist URL: ").strip()
-        is_playlist = input("Is this a playlist? (y/n): ").strip().lower() == 'y'
-        urls = [url]
+        # Single video
+        print("\nFetching video information...")
+        infos = get_video_infos(url, cookiefile=args.cookiefile)
+        if not infos:
+            print("[ERROR] Could not fetch video info. Exiting.")
+            sys.exit(1)
 
-    cookiefile = args.cookiefile or input("Enter path to cookies file (leave blank if none): ").strip() or None
-    user_path = input("Enter save directory (or leave blank for default): ").strip()
-    save_path = os.path.expanduser(user_path) if user_path else get_default_save_path()
+        mode = args.mode or input("Download mode - video or audio? (v/a): ").strip().lower()
+        mode = 'audio' if mode.startswith('a') else 'video'
 
-    print("\nFetching video information...")
-    all_video_infos = []
-    for single_url in urls:
-        infos = get_video_infos(single_url, is_playlist, cookiefile=cookiefile)
-        all_video_infos.extend(infos)
+        if mode == 'video':
+            bitrates = {
+                '1': ('1080p', 5000),
+                '2': ('720p', 2500),
+                '3': ('480p', 1000),
+                '4': ('360p', 700),
+                '5': ('best', 4000)
+            }
+            print("\nChoose video quality:")
+            for key, (label, kbps) in bitrates.items():
+                total_size = sum(estimate_size(d.get("duration", 0), kbps) for d in infos)
+                print(f"{key}. {label} — approx. {total_size} MB")
+            choice = input("Enter choice (1-5): ").strip()
+            selected_quality, _ = bitrates.get(choice, ('best', 4000 + 192))
+            quality_param = selected_quality
+        else:
+            audio_bitrates = {
+                '1': ('128', 128),
+                '2': ('192', 192),
+                '3': ('256', 256),
+                '4': ('320', 320)
+            }
+            print("\nChoose MP3 bitrate:")
+            for key, (label, kbps) in audio_bitrates.items():
+                total_size = sum(estimate_size(d.get("duration", 0), kbps) for d in infos)
+                print(f"{key}. {label} kbps — approx. {total_size} MB")
+            choice = input("Enter choice (1-4): ").strip()
+            selected_bitrate_label, _ = audio_bitrates.get(choice, ('192', 192))
+            quality_param = selected_bitrate_label
 
-    durations = [video.get('duration', 0) for video in all_video_infos]
+        download_one(url, mode, quality_param, save_path, args.cookiefile, session_entries)
 
-    mode = args.mode or input("Download mode - video or audio? (v/a): ").strip().lower()
-    mode = 'audio' if mode == 'a' else 'video'
-
-    if mode == 'video':
-        bitrates = {
-            '1': ('1080p', 5000),
-            '2': ('720p', 2500),
-            '3': ('480p', 1000),
-            '4': ('360p', 700),
-            '5': ('best', 4000)
-        }
-        print("\nChoose video quality:")
-        for key, (label, kbps) in bitrates.items():
-            total_size = sum(estimate_size(d, kbps) for d in durations)
-            print(f"{key}. {label} — approx. {total_size} MB")
-        choice = input("Enter choice (1-5): ").strip()
-        selected_quality, _ = bitrates.get(choice, ('best', 4000 + 192))
-        quality_param = selected_quality
-    else:
-        audio_bitrates = {
-            '1': ('128', 128),
-            '2': ('192', 192),
-            '3': ('256', 256),
-            '4': ('320', 320)
-        }
-        print("\nChoose MP3 bitrate:")
-        for key, (label, kbps) in audio_bitrates.items():
-            total_size = sum(estimate_size(d, kbps) for d in durations)
-            print(f"{key}. {label} kbps — approx. {total_size} MB")
-        choice = input("Enter choice (1-4): ").strip()
-        selected_bitrate_label, _ = audio_bitrates.get(choice, ('192', 192))
-        quality_param = selected_bitrate_label
-
-    if args.file or is_playlist:
-        download_media(
-            all_video_infos,
-            mode,
-            quality_param,
-            save_path,
-            cookiefile=cookiefile
-        )
-    else:
-        download_media(
-            url,
-            mode,
-            quality_param,
-            save_path,
-            cookiefile=cookiefile
-        )
+    # Save session
+    log_session_result(log_file, session_id, session_entries)
 
 
 if __name__ == '__main__':
